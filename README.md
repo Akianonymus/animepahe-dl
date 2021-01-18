@@ -18,6 +18,7 @@
 - [fzf](https://github.com/junegunn/fzf)
 - [Node.js](https://nodejs.org/en/download/)
 - [ffmpeg](https://ffmpeg.org/download.html)
+- [openssl](https://www.openssl.org/source/)
 
 ## How to use
 
@@ -36,6 +37,7 @@ Options:
   -l                      optional, show m3u8 playlost link without downloading videos
   -r                      optional, specify resolution: "1080", "720"...
                           by default, the highest resolution is selected
+  -t                      to download episodes faster, specify number of threads
   -d                      enable debug mode
   -h | --help             display this help message
 ```
