@@ -46,6 +46,7 @@ set_var() {
     _SCRIPT_PATH=$(dirname "$(realpath "$0")")
     _ANIME_LIST_FILE="$_SCRIPT_PATH/anime.list"
     _SOURCE_FILE=".source.json"
+    unset _TMPFILE _FFMPEG_LIST_REMOVE
 }
 
 set_args() {
@@ -257,9 +258,8 @@ download_episode() {
 
             # grab key from m3u8
             key_file_url="$(grep "#EXT-X-KEY:METHOD" <<< "${m3u8_file}" | sed -e "s/^.*http/http/" -e "s/\"$//")"
-            "${_CURL}" -s -H "Referer: $_REFERER_URL" "${key_file_url}" -o "${num}.key_file" || return 1
-            key="$("${_XXD}" -p "${num}.key_file")"
-            rm -f "${num}.key_file"
+            "${_CURL}" -s -H "Referer: $_REFERER_URL" "${key_file_url}" -o "${_TMPFILE}.${num}.key_file" || return 1
+            key="$("${_XXD}" -p "${_TMPFILE}.${num}.key_file")"
 
             # grab segments
             mapfile -t segments_url <<< "$(grep '^http' <<< "${m3u8_file}")" && total_segments="${#segments_url}"
@@ -285,13 +285,14 @@ download_episode() {
 
             cd "${_SCRIPT_PATH:?}/${_ANIME_NAME:?}/" || exit 1
 
+            _FFMPEG_LIST_REMOVE+=(".${num}.ffmpeg_file_list")
             # generate a list with file name format as ffmpeg concat requires
             for segment in "${num}/"*.ts ; do
                 printf "%s\n" "file ${segment}"
-            done >| "${num}.ffmpeg_file_list"
+            done >| ".${num}.ffmpeg_file_list"
 
             # concat all the decrypted ts files
-            "$_FFMPEG" $erropt -f concat -i "${num}.ffmpeg_file_list" -c copy -bsf:a aac_adtstoasc -y "${num}.mp4" &&
+            "$_FFMPEG" $erropt -f concat -i ".${num}.ffmpeg_file_list" -c copy -bsf:a aac_adtstoasc -y "${num}.mp4" &&
                 rm -rf "${_SCRIPT_PATH:?}/${_ANIME_NAME:?}/${num:?}"
                 # remove the ${num} folder only if ffmpeg command ran successfully
         else
@@ -312,6 +313,18 @@ select_episodes_to_download() {
 
 remove_brackets() {
     awk -F']' '{print $1}' | sed -E 's/^\[//'
+}
+
+cleanup() {
+    {
+        [[ ${_PARALLEL_RUN:-} = "true" ]] && rm -f "${_TMPFILE:?}"* "${_FFMPEG_LIST_REMOVE[@]:?}"
+
+        export abnormal_exit && [[ -n ${abnormal_exit} ]] &&
+            printf "\n\n%s\n" "Script exited manually."
+        # kill the whole script including all the child processes
+        kill -- -$$ &
+    } 2>| /dev/null || :
+    return 0
 }
 
 main() {
@@ -344,6 +357,18 @@ main() {
     fi
 
     download_source
+
+    # handle ctrl + c and ctrl + z
+    trap 'abnormal_exit="1"; exit' INT TERM
+    trap 'cleanup' EXIT
+    trap '' TSTP # ignore ctrl + z
+
+    export MAIN_PID="$$"
+
+    [[ ${_PARALLEL_RUN:-} = "true" ]] && {
+        { command -v mktemp 1>| /dev/null && _TMPFILE="$(mktemp -u)"; } ||
+            _TMPFILE="${PWD}/.$(_t="$(printf "%(%s)T\\n" "-1")" && printf "%s\n" "$((_t * _t))").LOG"
+    }
 
     [[ -z "${_ANIME_EPISODE:-}" ]] && _ANIME_EPISODE=$(select_episodes_to_download)
     download_episodes "$_ANIME_EPISODE"
